@@ -21,17 +21,27 @@ func main() {
 	}
 	defer connection.Close()
 
-	fmt.Println("Successfuly connected to RabbitMq server")
-	
+	fmt.Println("Peril game server successfuly connected to RabbitMq server")
+
 	//Creating new channel
 	mainChannel, err := connection.Channel()
 	if err != nil {
 		log.Fatalf("Error creating to Channel: %v", err)
 	}
 
-
 	// Declare and bind queue to peril_topic
-	pubsub.DeclareAndBind()
+	_, queue, err:= pubsub.DeclareAndBind(
+		connection,
+		routing.ExchangePerilTopic,
+		routing.GameLogSlug,
+		routing.GameLogSlug+".*",
+		pubsub.SimpleQueueDurable,
+	)
+
+	if err != nil {
+		log.Fatalf("could not subscribe to pause: %v", err)
+	}
+	fmt.Printf("Queue %v declared and bound!\n", queue.Name)
 
 	gamelogic.PrintClientHelp()
 
@@ -74,6 +84,3 @@ func main() {
 	// fmt.Println("RabbitMQ connection closed.")
 
 }
-
-
-

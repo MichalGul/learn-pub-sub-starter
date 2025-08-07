@@ -11,6 +11,9 @@ import (
 
 type simpleQueueType string
 
+const SimpleQueueDurable = "durable"
+
+
 // Publishes PublishJSON value of generic Type T into exchange by channel ch
 // value is Marshaled to json 
 func PublishJSON[T any](ch *amqp.Channel, exchange, key string, val T) error {
@@ -30,7 +33,7 @@ func PublishJSON[T any](ch *amqp.Channel, exchange, key string, val T) error {
 }
 
 
-// Declares and binds a transistient queue
+// Declares and binds a queue
 func DeclareAndBind(
 	conn *amqp.Connection,
 	exchange,
@@ -42,7 +45,7 @@ func DeclareAndBind(
 	//Creating new channel
 	channel, err := conn.Channel()
 	if err != nil {
-		return &amqp.Channel{}, amqp.Queue{}, errors.New("Error creating to Channel")
+		return &amqp.Channel{}, amqp.Queue{}, errors.New("Error creating Channel")
 	}
 
 	declaredQueue, err := channel.QueueDeclare(queueName,
