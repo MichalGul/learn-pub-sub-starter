@@ -6,6 +6,7 @@ import (
 	"errors"
 	"fmt"
 	"log"
+
 	amqp "github.com/rabbitmq/amqp091-go"
 )
 
@@ -20,8 +21,6 @@ const (
 
 const SimpleQueueDurable = "durable"
 const SimpleQueueTransient = "transient"
-
-
 
 // Publishes PublishJSON value of generic Type T into exchange by channel ch
 // value is Marshaled to json
@@ -61,8 +60,10 @@ func DeclareAndBind(
 		queueType == "transient",
 		queueType == "transient",
 		false,
-		nil)
+		amqp.Table{"x-dead-letter-exchange": "peril_dlx"})
+
 	if err != nil {
+		log.Println(err)
 		return channel, amqp.Queue{}, errors.New("Error declaring queue")
 	}
 
@@ -93,7 +94,6 @@ func SubscribeJSON[T any](
 
 	deliveryChannel, err := channel.Consume(queueName, "", false, false, false, false, nil)
 
-
 	go func() error {
 		defer channel.Close()
 		for msg := range deliveryChannel {
@@ -109,21 +109,20 @@ func SubscribeJSON[T any](
 
 			// acknowledge the message and remove from the queue
 			switch messageAckinfo {
-				case Ack:					
-					msg.Ack(false)
-					log.Println("Message was acknowledged: Ack")
-				case NackRequeue:
-					msg.Nack(false, true)
-					log.Println("Message was not acknowledged: NackRequeue")
-				case NackDiscard:
-					msg.Nack(false, false)
-					log.Println("Message was not acknowledged: NackDiscard")
+			case Ack:
+				msg.Ack(false)
+				log.Println("Message was acknowledged: Ack")
+			case NackRequeue:
+				msg.Nack(false, true)
+				log.Println("Message was not acknowledged: NackRequeue")
+			case NackDiscard:
+				msg.Nack(false, false)
+				log.Println("Message was not acknowledged: NackDiscard")
 			}
 		}
-		
-		return nil 
-	}()
 
+		return nil
+	}()
 
 	return nil
 }
