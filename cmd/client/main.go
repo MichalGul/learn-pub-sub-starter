@@ -3,21 +3,31 @@ package main
 import (
 	"fmt"
 	"log"
+
 	"github.com/MichalGul/learn-pub-sub-starter/internal/gamelogic"
 	"github.com/MichalGul/learn-pub-sub-starter/internal/pubsub"
 	"github.com/MichalGul/learn-pub-sub-starter/internal/routing"
 	amqp "github.com/rabbitmq/amqp091-go"
 )
 
-
+// HANDLERS FOR PUBLISHED MOVES
 func handlerPause(gs *gamelogic.GameState) func(routing.PlayingState) {
-	defer fmt.Print("> ")
 
 	return func(ps routing.PlayingState) {
+		defer fmt.Print("> ")
 		gs.HandlePause(ps)
 	}
 
 }
+
+func handlerMove(gs *gamelogic.GameState) func(gamelogic.ArmyMove) {
+
+	return func(mv gamelogic.ArmyMove) {
+		defer fmt.Print("> ")
+		gs.HandleMove(mv)
+	}
+}
+
 
 func main() {
 	fmt.Println("Starting Peril client...")
@@ -36,7 +46,8 @@ func main() {
 		log.Fatalf("Client server failed to run: %v", err)
 	}
 
-	pubsub.DeclareAndBind(
+	// Declare for direct exchange for pause messages
+	channel, _, err := pubsub.DeclareAndBind(
 		connection,
 		routing.ExchangePerilDirect,
 		fmt.Sprintf("%s.%s", routing.PauseKey, userName),
@@ -46,18 +57,29 @@ func main() {
 	gameState := gamelogic.NewGameState(userName)
 
 	err = pubsub.SubscribeJSON(connection,
-		 routing.ExchangePerilDirect,
-		  fmt.Sprintf("%s.%s", routing.PauseKey, userName),
-		  routing.PauseKey,
-		  pubsub.SimpleQueueTransient,
-		  handlerPause(gameState),
-		)
+		routing.ExchangePerilDirect,
+		fmt.Sprintf("%s.%s", routing.PauseKey, userName),
+		routing.PauseKey,
+		pubsub.SimpleQueueTransient,
+		handlerPause(gameState),
+	)
 
 	if err != nil {
 		log.Fatalf("Error subscribing to Direct exchange pause queue: %v", err)
 	}
 
-
+	//Subscribe to moves from other players exchange army_moves.*
+	err = pubsub.SubscribeJSON(
+		connection,
+		routing.ExchangePerilTopic,
+		routing.ArmyMovesPrefix+"."+userName,
+		routing.ArmyMovesPrefix+".*",
+		pubsub.SimpleQueueTransient,
+		handlerMove(gameState),
+	)
+	if err != nil {
+		log.Fatalf("could not subscribe to army moves: %v", err)
+	}
 
 	for {
 		commands := gamelogic.GetInput()
@@ -77,7 +99,13 @@ func main() {
 			if err != nil {
 				log.Printf("could not move unit: %v", err)
 			} else {
-				log.Printf("Army moved to %s", armyMove.ToLocation)
+				// publish move message to all subscribents
+				err := pubsub.PublishJSON(channel, routing.ExchangePerilTopic, routing.ArmyMovesPrefix+"."+userName, armyMove)
+				if err != nil {
+					log.Printf("publishing move failed: %v", err)
+				} else {
+					log.Printf("Published message: Army with units %s moved to %s", len(armyMove.Units), armyMove.ToLocation)
+				}
 			}
 		case "status":
 			gameState.CommandStatus()
