@@ -5,14 +5,22 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
-
+	"log"
 	amqp "github.com/rabbitmq/amqp091-go"
 )
 
 type simpleQueueType string
+type Acktype int
+
+const (
+	Ack Acktype = iota
+	NackDiscard
+	NackRequeue
+)
 
 const SimpleQueueDurable = "durable"
 const SimpleQueueTransient = "transient"
+
 
 
 // Publishes PublishJSON value of generic Type T into exchange by channel ch
@@ -75,7 +83,7 @@ func SubscribeJSON[T any](
 	queueName,
 	key string,
 	queueType simpleQueueType, // an enum to represent "durable" or "transient"
-	handler func(T),
+	handler func(T) Acktype,
 ) error {
 
 	channel, _, err := DeclareAndBind(conn, exchange, queueName, key, queueType)
@@ -87,6 +95,7 @@ func SubscribeJSON[T any](
 
 
 	go func() error {
+		defer channel.Close()
 		for msg := range deliveryChannel {
 
 			var msgBody T
@@ -96,11 +105,20 @@ func SubscribeJSON[T any](
 				return fmt.Errorf("error unmarshalling message %v", marshallErr)
 			}
 
-			handler(msgBody)
+			messageAckinfo := handler(msgBody)
 
 			// acknowledge the message and remove from the queue
-			msg.Ack(false)
-
+			switch messageAckinfo {
+				case Ack:					
+					msg.Ack(false)
+					log.Println("Message was acknowledged: Ack")
+				case NackRequeue:
+					msg.Nack(false, true)
+					log.Println("Message was not acknowledged: NackRequeue")
+				case NackDiscard:
+					msg.Nack(false, false)
+					log.Println("Message was not acknowledged: NackDiscard")
+			}
 		}
 		
 		return nil 
