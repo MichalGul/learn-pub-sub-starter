@@ -11,6 +11,18 @@ import (
 	amqp "github.com/rabbitmq/amqp091-go"
 )
 
+
+func handlerGameLogPassed() func(routing.GameLog) pubsub.Acktype {
+
+	return func(gl routing.GameLog) pubsub.Acktype {
+		defer fmt.Print("> ")
+		gamelogic.WriteLog(gl)
+		return pubsub.Ack
+	}
+
+}
+
+
 func main() {
 	fmt.Println("Starting Peril server...")
 
@@ -42,6 +54,18 @@ func main() {
 		log.Fatalf("could not subscribe to pause: %v", err)
 	}
 	fmt.Printf("Queue %v declared and bound!\n", queue.Name)
+
+	pubsub.SubscribeGob(
+		connection,
+		routing.ExchangePerilTopic,
+		routing.GameLogSlug,
+		routing.GameLogSlug+".*",
+		pubsub.SimpleQueueDurable,
+		handlerGameLogPassed(),
+	)
+
+
+
 
 	gamelogic.PrintClientHelp()
 

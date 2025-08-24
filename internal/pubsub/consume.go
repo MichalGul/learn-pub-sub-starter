@@ -1,6 +1,8 @@
 package pubsub
 
 import (
+	"bytes"
+	"encoding/gob"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -107,4 +109,59 @@ func SubscribeJSON[T any](
 	}()
 
 	return nil
+}
+
+
+// Subscribe to Gob publish (GameLogs)
+func SubscribeGob[T any](
+	conn *amqp.Connection,
+	exchange,
+	queueName,
+	key string,
+	queueType simpleQueueType, // an enum to represent "durable" or "transient"
+	handler func(T) Acktype,
+) error {
+
+	channel, _, err := DeclareAndBind(conn, exchange, queueName, key, queueType)
+	if err != nil {
+		return errors.New("error declaring queue " + queueName + " to exchange" + exchange)
+	}
+
+	deliveryChannel, err := channel.Consume(queueName, "", false, false, false, false, nil)
+
+	go func() error {
+		defer channel.Close()
+		for msg := range deliveryChannel {
+
+			bufforData :=  bytes.NewBuffer(msg.Body)
+			var msgBody T
+
+			decoder := gob.NewDecoder(bufforData)
+			decodeError := decoder.Decode(&msgBody)
+
+			if decodeError != nil {
+				log.Printf("error decoding gob message %v", decodeError)
+			}
+
+			messageAckinfo := handler(msgBody)
+
+			// acknowledge the message and remove from the queue
+			switch messageAckinfo {
+			case Ack:
+				msg.Ack(false)
+				log.Println("Message was acknowledged: Ack")
+			case NackRequeue:
+				msg.Nack(false, true)
+				log.Println("Message was not acknowledged: NackRequeue")
+			case NackDiscard:
+				msg.Nack(false, false)
+				log.Println("Message was not acknowledged: NackDiscard")
+			}
+		}
+		return nil
+	}()
+
+	return nil
+
+
 }
