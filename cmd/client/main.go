@@ -3,6 +3,7 @@ package main
 import (
 	"fmt"
 	"log"
+	"time"
 
 	"github.com/MichalGul/learn-pub-sub-starter/internal/gamelogic"
 	"github.com/MichalGul/learn-pub-sub-starter/internal/pubsub"
@@ -44,7 +45,7 @@ func handlerMove(gs *gamelogic.GameState, channel *amqp.Channel) func(gamelogic.
 				return pubsub.NackRequeue
 			}
 			return pubsub.Ack
-			
+
 		}
 
 		fmt.Println("error: unknown move outcome")
@@ -52,26 +53,73 @@ func handlerMove(gs *gamelogic.GameState, channel *amqp.Channel) func(gamelogic.
 	}
 }
 
-func handlerWar(gs *gamelogic.GameState) func(gamelogic.RecognitionOfWar) pubsub.Acktype {
+func publishGameLog(channel *amqp.Channel, gameLog routing.GameLog, exchange, key string) error {
+	return pubsub.PublishGob(
+		channel,
+		exchange,
+		key,
+		gameLog,
+	)
+
+}
+
+func handlerWar(gs *gamelogic.GameState, channel *amqp.Channel) func(gamelogic.RecognitionOfWar) pubsub.Acktype {
 
 	return func(war gamelogic.RecognitionOfWar) pubsub.Acktype {
 		defer fmt.Print("> ")
-		warOutcome, _, _ := gs.HandleWar(war)
+		warOutcome, warWinner, warLoser := gs.HandleWar(war)
+		var logMessage string
+		var shouldPublishGameLog bool
+
 		switch warOutcome {
 		case gamelogic.WarOutcomeNotInvolved:
 			return pubsub.NackRequeue
+
 		case gamelogic.WarOutcomeNoUnits:
 			return pubsub.NackDiscard
+
 		case gamelogic.WarOutcomeOpponentWon:
-			return pubsub.Ack
+			logMessage = fmt.Sprintf("%s won a war against %s", warWinner, warLoser)
+			fmt.Println(logMessage)
+			shouldPublishGameLog = true
+
+
 		case gamelogic.WarOutcomeYouWon:
-			return pubsub.Ack
+			logMessage = fmt.Sprintf("%s won a war against %s", warWinner, warLoser)
+			fmt.Println(logMessage)
+			shouldPublishGameLog = true
+
 		case gamelogic.WarOutcomeDraw:
-			return pubsub.Ack
+			logMessage = fmt.Sprintf("A war between %s and %s resulted in a draw", warWinner, warLoser)
+			fmt.Println(logMessage)
+			shouldPublishGameLog = true
+
 		default:
 			fmt.Println("error: unknown war outcome")
 			return pubsub.NackDiscard
 		}
+
+		if shouldPublishGameLog {
+
+			gameLog := routing.GameLog{
+				CurrentTime: time.Now(),
+				Message:     logMessage,
+				Username:    gs.GetUsername(),
+			}
+
+			if err := publishGameLog(
+				channel,
+				gameLog,
+				routing.ExchangePerilTopic,
+				routing.GameLogSlug + "." + gameLog.Username,
+			); err != nil {
+				return pubsub.NackRequeue
+			}
+			return pubsub.Ack
+
+		}
+		return pubsub.Ack
+
 	}
 }
 
@@ -134,7 +182,7 @@ func main() {
 		routing.WarRecognitionsPrefix,
 		routing.WarRecognitionsPrefix+".#",
 		pubsub.SimpleQueueDurable,
-		handlerWar(gameState),
+		handlerWar(gameState, channel),
 	)
 	if err != nil {
 		log.Fatalf("could not subscribe to war events: %v", err)
